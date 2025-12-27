@@ -1,41 +1,24 @@
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
+# --- Pliki wykonywalne i kompilacji ---
+*.exe
 *.o
 *.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
 *.dll
 
-# Fortran module files
-*.mod
-*.smod
+# --- Wyjątek: Chcemy zachować biblioteki DLL w folderze bin ---
+!bin/*.dll
+!*.dll
 
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
+# --- Folder z plikami tymczasowymi VS Code (opcjonalne) ---
+.vscode/ipch/
+.vscode/*.db
 
-# Executables
-*.exe
-*.out
-*.app
+# --- Pliki systemowe Windows ---
+Thumbs.db
+Desktop.ini
+ehthumbs.db
 
-# debug information files
-*.dwo
+# --- Inne śmieci ---
+*.log
+*.tlog
+*.pdb
+*.ilk
