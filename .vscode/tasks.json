@@ -12,6 +12,7 @@
                 "-L${workspaceFolder}/lib",
                 "${workspaceFolder}/src/main.cpp",
                 "${workspaceFolder}/src/glad.c",
+                "-lassimp",
                 "-lfreeglut",
                 "-lopengl32",
                 "-lglu32",

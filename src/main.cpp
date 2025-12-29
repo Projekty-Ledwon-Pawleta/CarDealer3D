@@ -8,6 +8,12 @@
 #include <iostream>
 #include <vector>
 
+#include "Shader.h"
+#include "Model.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 // --- USTAWIENIA OKNA ---
 int windowWidth = 800;
 int windowHeight = 600;
@@ -32,56 +38,61 @@ float lastFrame = 0.0f;
 // Klawisze
 bool keys[1024];
 
-// --- SHADERY ---
-const char* vertexShaderSource = R"(
-    #version 330 core
-    layout (location = 0) in vec3 aPos;
-    uniform mat4 model;
-    uniform mat4 view;
-    uniform mat4 projection;
-    void main() {
-        gl_Position = projection * view * model * vec4(aPos, 1.0);
-    }
-)";
+bool isWireframe = false;
 
-const char* fragmentShaderSource = R"(
-    #version 330 core
-    out vec4 FragColor;
-    void main() {
-        FragColor = vec4(0.4, 0.4, 0.4, 1.0); // Szara podłoga
-    }
-)";
-
-unsigned int shaderProgram;
 unsigned int VAO, VBO;
+unsigned int floorTexture;
 
-void setupShaders() {
-    unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
-    glCompileShader(vertexShader);
+Shader* ourShader = nullptr;
+Model* ourCar = nullptr;
+
+unsigned int carTexture;
+unsigned int tireTexture;
+
+unsigned int loadTexture(const char* path) {
+    unsigned int textureID;
+    glGenTextures(1, &textureID);
+
+    int width, height, nrChannels;
+    // OpenGL ma 0,0 na dole, a obrazki na górze - musimy obrócić
+    stbi_set_flip_vertically_on_load(true); 
+    unsigned char *data = stbi_load(path, &width, &height, &nrChannels, 0);
     
-    unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
-    glCompileShader(fragmentShader);
+    if (data) {
+        GLenum format;
+        if (nrChannels == 1) format = GL_RED;
+        else if (nrChannels == 3) format = GL_RGB; // .jpg zazwyczaj
+        else if (nrChannels == 4) format = GL_RGBA; // .png zazwyczaj
 
-    shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, vertexShader);
-    glAttachShader(shaderProgram, fragmentShader);
-    glLinkProgram(shaderProgram);
+        glBindTexture(GL_TEXTURE_2D, textureID);
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
 
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
+        // Ustawienia powtarzania (GL_REPEAT) i filtrowania
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        stbi_image_free(data);
+    } else {
+        std::cout << "Nie udalo sie wczytac tekstury: " << path << std::endl;
+        stbi_image_free(data);
+    }
+
+    return textureID;
 }
 
 void setupFloor() {
     // Podłoga 20x20
     float vertices[] = {
-         -10.0f, 0.0f, -10.0f,
-          10.0f, 0.0f, -10.0f,
-         -10.0f, 0.0f,  10.0f,
-          10.0f, 0.0f, -10.0f,
-          10.0f, 0.0f,  10.0f,
-         -10.0f, 0.0f,  10.0f
+         -10.0f, 0.0f, -10.0f, 0.0f, 10.0f,
+          10.0f, 0.0f, -10.0f, 10.0f, 10.0f,
+         -10.0f, 0.0f,  10.0f, 0.0f, 0.0f,
+
+          10.0f, 0.0f, -10.0f, 10.0f, 10.0f,
+          10.0f, 0.0f,  10.0f, 10.0f, 0.0f,
+         -10.0f, 0.0f,  10.0f, 0.0f, 0.0f
     };
 
     glGenVertexArrays(1, &VAO);
@@ -89,8 +100,13 @@ void setupFloor() {
     glBindVertexArray(VAO);
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
+
+    // Atrybut 1: Tekstura (2 floaty) - zaczyna się od 3-ciego float w rzędzie
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
 }
 
 // --- POPRAWIONA LOGIKA RUCHU (CHODZENIE) ---
@@ -128,18 +144,79 @@ void display() {
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    glUseProgram(shaderProgram);
+    ourShader->use();
 
     glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)windowWidth / (float)windowHeight, 0.1f, 100.0f);
     glm::mat4 model = glm::mat4(1.0f);
 
-    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
-    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
-    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(model));
+    // Wysyłamy macierze za pomocą helperów z klasy
+    ourShader->setMat4("view", view);
+    ourShader->setMat4("projection", projection);
+    ourShader->setMat4("model", model);
+    
+    // Obsługa tekstury
+    ourShader->setInt("useTexture", 1);
+    ourShader->setInt("texture1", 0);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, floorTexture);
+    
+    ourShader->setFloat("tiling", 1.0f);
 
     glBindVertexArray(VAO);
     glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    model = glm::mat4(1.0f);
+    model = glm::translate(model, glm::vec3(0.0f, 0.7f, 0.0f)); // Pozycja 0,0,0
+    model = glm::scale(model, glm::vec3(2.0f)); // Skala (zmieniaj jeśli auto jest gigantyczne)
+    ourShader->setMat4("model", model);
+
+    for(unsigned int i = 0; i < ourCar->meshes.size(); i++) {
+        Mesh& mesh = ourCar->meshes[i];
+        std::string name = mesh.materialName;
+
+        // Domyślne ustawienia (reset)
+        ourShader->setInt("useTexture", 0); 
+        ourShader->setVec3("objectColor", 0.5f, 0.5f, 0.5f); // Szary domyślny
+
+        float currentTiling = 1.0f;
+
+        // LOGIKA MATERIAŁÓW (Na podstawie nazw z Blendera)
+        
+        // 1. Opony i czarne elementy
+        if(name.find("Black") != std::string::npos || name.find("black") != std::string::npos) {
+            ourShader->setInt("useTexture", 1);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, tireTexture); // Tekstura opony
+
+            currentTiling = 15.0f;
+        }
+        // 2. Karoseria (Główny materiał)
+        else if(name.find("Material") != std::string::npos || name.find("Red") != std::string::npos) { 
+            // Zakładam, że _10_Material to karoseria, a Red to też pomalujemy na karoserię
+            ourShader->setInt("useTexture", 1);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, carTexture); // Zielony metal
+
+            currentTiling = 2.0f;
+        }
+        // 3. Szyby (Szkło)
+        else if(name.find("glass") != std::string::npos) {
+            ourShader->setInt("useTexture", 0); // Bez tekstury, sam kolor
+            // Półprzezroczysty niebieski (wymaga włączenia blendowania w OpenGL, na razie damy lity)
+            ourShader->setVec3("objectColor", 0.2f, 0.3f, 0.5f); 
+        }
+        // 4. Reszta (Stal itp.)
+        else {
+             ourShader->setVec3("objectColor", 0.3f, 0.3f, 0.3f); // Ciemnoszary
+        }
+
+        ourShader->setFloat("tiling", currentTiling);
+
+        // Narysuj tę konkretną część
+        mesh.Draw(*ourShader);
+    }
 
     glutSwapBuffers();
     glutPostRedisplay();
@@ -148,6 +225,12 @@ void display() {
 void keyboardDown(unsigned char key, int x, int y) {
     if(key == 27) glutLeaveMainLoop();
     keys[key] = true;
+
+    if(key == 'z' || key == 'Z') {
+        isWireframe = !isWireframe;
+        if(isWireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        else glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    }
 }
 
 void keyboardUp(unsigned char key, int x, int y) {
@@ -203,8 +286,15 @@ int main(int argc, char** argv) {
     if (!gladLoadGL()) return -1;
     glEnable(GL_DEPTH_TEST);
 
-    setupShaders();
+    ourShader = new Shader("shaders/shader.vert", "shaders/shader.frag");
+    ourCar = new Model("models/car-6.obj");
+
     setupFloor();
+
+    floorTexture = loadTexture("textures/floor.png");
+
+    carTexture = loadTexture("textures/car_paint_1.jpg");
+    tireTexture = loadTexture("textures/tire_texture.jpg");
 
     glutDisplayFunc(display);
     glutReshapeFunc(resize);
@@ -222,5 +312,7 @@ int main(int argc, char** argv) {
     glutWarpPointer(windowWidth / 2, windowHeight / 2);
 
     glutMainLoop();
+
+    delete ourShader;
     return 0;
 }
