@@ -15,8 +15,8 @@
 #include "stb_image.h"
 
 // --- USTAWIENIA OKNA ---
-int windowWidth = 800;
-int windowHeight = 600;
+int windowWidth = 1200;
+int windowHeight = 800;
 
 // --- KAMERA ---
 // Ustawiamy sztywną wysokość "oczu" (np. 1.7 metra - wzrost człowieka)
@@ -155,6 +155,10 @@ void display() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     ourShader->use();
+
+    ourShader->setVec3("lightPos", 0.0f, 20.0f, 0.0f); 
+    ourShader->setVec3("viewPos", cameraPos.x, cameraPos.y, cameraPos.z);
+    ourShader->setVec3("lightColor", 1.0f, 1.0f, 1.0f);
 
     glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)windowWidth / (float)windowHeight, 0.1f, 100.0f);
