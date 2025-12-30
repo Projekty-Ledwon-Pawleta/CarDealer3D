@@ -41,13 +41,23 @@ bool keys[1024];
 bool isWireframe = false;
 
 unsigned int VAO, VBO;
+
 unsigned int floorTexture;
+unsigned int tireTexture;
+unsigned int steelTexture;
+unsigned int glassTexture;
+unsigned int redTexture;
+unsigned int blackTexture;
+unsigned int lightTexture;
 
 Shader* ourShader = nullptr;
-Model* ourCar = nullptr;
 
-unsigned int carTexture;
-unsigned int tireTexture;
+std::vector<Model*> carModels;
+std::vector<unsigned int> assignedPaints;
+
+// Konfiguracja
+const int CAR_COUNT = 5; // Ile aut chcemy wczytać?
+float carSpacing = 3.0f; // Odstęp między autami (w metrach)
 
 unsigned int loadTexture(const char* path) {
     unsigned int textureID;
@@ -148,74 +158,103 @@ void display() {
 
     glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)windowWidth / (float)windowHeight, 0.1f, 100.0f);
-    glm::mat4 model = glm::mat4(1.0f);
-
-    // Wysyłamy macierze za pomocą helperów z klasy
+    
     ourShader->setMat4("view", view);
     ourShader->setMat4("projection", projection);
+
+    // --- RYSOWANIE PODŁOGI ---
+    glm::mat4 model = glm::mat4(1.0f);
     ourShader->setMat4("model", model);
-    
-    // Obsługa tekstury
     ourShader->setInt("useTexture", 1);
     ourShader->setInt("texture1", 0);
+    ourShader->setFloat("tiling", 10.0f); // Gęsta podłoga
+    ourShader->setVec3("objectColor", 1.0f, 1.0f, 1.0f);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, floorTexture);
-    
-    ourShader->setFloat("tiling", 1.0f);
-
     glBindVertexArray(VAO);
     glDrawArrays(GL_TRIANGLES, 0, 6);
 
-    model = glm::mat4(1.0f);
-    model = glm::translate(model, glm::vec3(0.0f, 0.7f, 0.0f)); // Pozycja 0,0,0
-    model = glm::scale(model, glm::vec3(2.0f)); // Skala (zmieniaj jeśli auto jest gigantyczne)
-    ourShader->setMat4("model", model);
+    // --- RYSOWANIE SAMOCHODÓW W PĘTLI ---
+    // Obliczamy pozycję startową, żeby środkowe auto było na środku (X=0)
+    float startX = -((CAR_COUNT - 1) * carSpacing) / 2.0f;
 
-    for(unsigned int i = 0; i < ourCar->meshes.size(); i++) {
-        Mesh& mesh = ourCar->meshes[i];
-        std::string name = mesh.materialName;
+    for(int i = 0; i < carModels.size(); i++) {
+        model = glm::mat4(1.0f);
+        float xPos = startX + (i * carSpacing);
+        model = glm::translate(model, glm::vec3(xPos, 0.65f, 0.0f)); 
+        model = glm::scale(model, glm::vec3(2.0f)); 
 
-        // Domyślne ustawienia (reset)
-        ourShader->setInt("useTexture", 0); 
-        ourShader->setVec3("objectColor", 0.5f, 0.5f, 0.5f); // Szary domyślny
+        ourShader->setMat4("model", model);
 
-        float currentTiling = 1.0f;
+        Model* currentCar = carModels[i];
+        unsigned int currentPaint = assignedPaints[i];
 
-        // LOGIKA MATERIAŁÓW (Na podstawie nazw z Blendera)
-        
-        // 1. Opony i czarne elementy
-        if(name.find("Black") != std::string::npos || name.find("black") != std::string::npos) {
+        for(unsigned int j = 0; j < currentCar->meshes.size(); j++) {
+            Mesh& mesh = currentCar->meshes[j];
+            std::string name = mesh.materialName;
+            float currentTiling = 1.0f;
+            
             ourShader->setInt("useTexture", 1);
+            ourShader->setVec3("objectColor", 1.0f, 1.0f, 1.0f); // Reset
             glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, tireTexture); // Tekstura opony
 
-            currentTiling = 15.0f;
-        }
-        // 2. Karoseria (Główny materiał)
-        else if(name.find("Material") != std::string::npos || name.find("Red") != std::string::npos) { 
-            // Zakładam, że _10_Material to karoseria, a Red to też pomalujemy na karoserię
-            ourShader->setInt("useTexture", 1);
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, carTexture); // Zielony metal
+            // =========================================================
+            // METODA 1: AUTO NR 1 (SKINOWANIE / UV MAPPING)
+            // =========================================================
+            if (i == 0) {
+                // To jest Car 1. Ma dedykowaną teksturę car_paint_1.jpg
+                // Nakładamy ją na wszystko, chyba że trafimy na oponę.
+                
+                if(name.find("Glass") != std::string::npos) {
+                    // Opony nadal chcemy gumowe
+                    glBindTexture(GL_TEXTURE_2D, glassTexture);
+                    currentTiling = 1.0f;
+                } else {
+                    glBindTexture(GL_TEXTURE_2D, currentPaint);
+                    currentTiling = 1.0f;
+                }
+            }
+            // =========================================================
+            // METODA 2: AUTA NR 2-5 (MATERIAL MAPPING / TILING)
+            // =========================================================
+            else {
+                // Tutaj sprawdzamy nazwy materiałów i dobieramy teksturę
 
-            currentTiling = 2.0f;
-        }
-        // 3. Szyby (Szkło)
-        else if(name.find("glass") != std::string::npos) {
-            ourShader->setInt("useTexture", 0); // Bez tekstury, sam kolor
-            // Półprzezroczysty niebieski (wymaga włączenia blendowania w OpenGL, na razie damy lity)
-            ourShader->setVec3("objectColor", 0.2f, 0.3f, 0.5f); 
-        }
-        // 4. Reszta (Stal itp.)
-        else {
-             ourShader->setVec3("objectColor", 0.3f, 0.3f, 0.3f); // Ciemnoszary
-        }
+                // 1. Opony
+                if(name.find("Black") != std::string::npos || 
+                   name.find("Tire") != std::string::npos  || 
+                   name.find("Rubber") != std::string::npos) {
+                    glBindTexture(GL_TEXTURE_2D, tireTexture);
+                }
+                // 2. Stal / Chrom
+                else if(name.find("steel") != std::string::npos || 
+                        name.find("Chrome") != std::string::npos) {
+                    glBindTexture(GL_TEXTURE_2D, steelTexture);
+                }
+                // 3. Czerwone światła
+                else if(name.find("Red") != std::string::npos) {
+                    glBindTexture(GL_TEXTURE_2D, redTexture);
+                }
+                // 4. Jasne światła
+                else if(name.find("Light") != std::string::npos) {
+                    glBindTexture(GL_TEXTURE_2D, lightTexture);
+                }
+                // 5. Szyby
+                else if(name.find("glass") != std::string::npos || 
+                        name.find("Window") != std::string::npos) {
+                    glBindTexture(GL_TEXTURE_2D, glassTexture);
+                }
+                // 6. Karoseria (wszystko inne)
+                else {
+                    glBindTexture(GL_TEXTURE_2D, currentPaint);
+                    currentTiling = 4.0f; // Powtarzamy teksturę lakieru (ziarno)
+                }
+            }
 
-        ourShader->setFloat("tiling", currentTiling);
-
-        // Narysuj tę konkretną część
-        mesh.Draw(*ourShader);
+            ourShader->setFloat("tiling", currentTiling);
+            mesh.Draw(*ourShader);
+        }
     }
 
     glutSwapBuffers();
@@ -287,15 +326,32 @@ int main(int argc, char** argv) {
     glEnable(GL_DEPTH_TEST);
 
     ourShader = new Shader("shaders/shader.vert", "shaders/shader.frag");
-    ourCar = new Model("models/car-6.obj");
 
     setupFloor();
 
     floorTexture = loadTexture("textures/floor.png");
+    tireTexture  = loadTexture("textures/tire_texture.jpg");
+    steelTexture = loadTexture("textures/steel_texture.jpg");
+    glassTexture = loadTexture("textures/glass_texture.jpg");
+    redTexture   = loadTexture("textures/red_texture.jpg");
+    lightTexture = loadTexture("textures/light_texture.jpg");
 
-    carTexture = loadTexture("textures/car_paint_1.jpg");
-    tireTexture = loadTexture("textures/tire_texture.jpg");
-
+    std::cout << "Ladowanie 5 samochodow..." << std::endl;
+    for(int i = 1; i <= CAR_COUNT; i++) {
+        std::string modelPath = "models/car-" + std::to_string(i) + ".obj";
+        // UWAGA: Każde auto dostaje swój car_paint_X.jpg
+        std::string texPath = "textures/car_paint_" + std::to_string(i) + ".jpg";
+        
+        std::cout << "Ladowanie: " << modelPath << std::endl;
+        
+        Model* newCar = new Model(modelPath);
+        carModels.push_back(newCar);
+        
+        // Ładujemy dedykowaną teksturę
+        unsigned int paintID = loadTexture(texPath.c_str());
+        assignedPaints.push_back(paintID);
+    }
+    
     glutDisplayFunc(display);
     glutReshapeFunc(resize);
     glutKeyboardFunc(keyboardDown);
@@ -314,5 +370,7 @@ int main(int argc, char** argv) {
     glutMainLoop();
 
     delete ourShader;
+    for(auto car : carModels) delete car;
+
     return 0;
 }

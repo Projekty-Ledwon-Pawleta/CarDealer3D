@@ -1,7 +1,6 @@
 # --- Pliki wykonywalne i kompilacji ---
 *.exe
 *.o
-*.obj
 *.dll
 
 # --- Wyjątek: Chcemy zachować biblioteki DLL w folderze bin ---
