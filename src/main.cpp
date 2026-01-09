@@ -43,6 +43,9 @@ bool isWireframe = false;
 unsigned int VAO, VBO;
 
 unsigned int floorTexture;
+unsigned int wallTexture;
+unsigned int ceilingTexture;
+
 unsigned int tireTexture;
 unsigned int steelTexture;
 unsigned int glassTexture;
@@ -50,14 +53,19 @@ unsigned int redTexture;
 unsigned int blackTexture;
 unsigned int lightTexture;
 
+
 Shader* ourShader = nullptr;
 
 std::vector<Model*> carModels;
 std::vector<unsigned int> assignedPaints;
 
+std::vector<unsigned int> availablePaints;
+
 // Konfiguracja
 const int CAR_COUNT = 5; // Ile aut chcemy wczytać?
 float carSpacing = 3.0f; // Odstęp między autami (w metrach)
+
+glm::vec3 currentLightColor = glm::vec3(1.0f, 0.0f, 0.0f);
 
 unsigned int loadTexture(const char* path) {
     unsigned int textureID;
@@ -93,30 +101,77 @@ unsigned int loadTexture(const char* path) {
     return textureID;
 }
 
-void setupFloor() {
-    // Podłoga 20x20
-    float vertices[] = {
-         -10.0f, 0.0f, -10.0f, 0.0f, 10.0f,
-          10.0f, 0.0f, -10.0f, 10.0f, 10.0f,
-         -10.0f, 0.0f,  10.0f, 0.0f, 0.0f,
+void setupRoom() {
+    float size = 10.0f;  // Promień pokoju (od środka do ściany)
+    float height = 4.0f; // Wysokość
 
-          10.0f, 0.0f, -10.0f, 10.0f, 10.0f,
-          10.0f, 0.0f,  10.0f, 10.0f, 0.0f,
-         -10.0f, 0.0f,  10.0f, 0.0f, 0.0f
+    // Format: x, y, z,   u, v,   nx, ny, nz
+    float vertices[] = {
+        // --- 1. PODŁOGA (Y=0, Normalna w górę) ---
+         -size, 0.0f, -size,  0.0f, 1.0f,   0.0f, 1.0f, 0.0f,
+         -size, 0.0f,  size,  0.0f, 0.0f,   0.0f, 1.0f, 0.0f,
+          size, 0.0f,  size,  1.0f, 0.0f,   0.0f, 1.0f, 0.0f,
+          size, 0.0f,  size,  1.0f, 0.0f,   0.0f, 1.0f, 0.0f,
+          size, 0.0f, -size,  1.0f, 1.0f,   0.0f, 1.0f, 0.0f,
+         -size, 0.0f, -size,  0.0f, 1.0f,   0.0f, 1.0f, 0.0f,
+
+        // --- 2. SUFIT (Y=height, Normalna w dół) ---
+         -size, height, -size,  0.0f, 1.0f,   0.0f, -1.0f, 0.0f,
+          size, height, -size,  1.0f, 1.0f,   0.0f, -1.0f, 0.0f,
+          size, height,  size,  1.0f, 0.0f,   0.0f, -1.0f, 0.0f,
+          size, height,  size,  1.0f, 0.0f,   0.0f, -1.0f, 0.0f,
+         -size, height,  size,  0.0f, 0.0f,   0.0f, -1.0f, 0.0f,
+         -size, height, -size,  0.0f, 1.0f,   0.0f, -1.0f, 0.0f,
+
+        // --- 3. ŚCIANA TYLNA (Z=-size, Normalna w stronę kamery +Z) ---
+         -size, 0.0f,   -size,  0.0f, 0.0f,   0.0f, 0.0f, 1.0f,
+          size, 0.0f,   -size,  1.0f, 0.0f,   0.0f, 0.0f, 1.0f,
+          size, height, -size,  1.0f, 1.0f,   0.0f, 0.0f, 1.0f,
+          size, height, -size,  1.0f, 1.0f,   0.0f, 0.0f, 1.0f,
+         -size, height, -size,  0.0f, 1.0f,   0.0f, 0.0f, 1.0f,
+         -size, 0.0f,   -size,  0.0f, 0.0f,   0.0f, 0.0f, 1.0f,
+
+        // --- 4. ŚCIANA LEWA (X=-size, Normalna w prawo +X) ---
+         -size, 0.0f,   size,   0.0f, 0.0f,   1.0f, 0.0f, 0.0f,
+         -size, 0.0f,  -size,   1.0f, 0.0f,   1.0f, 0.0f, 0.0f,
+         -size, height,-size,   1.0f, 1.0f,   1.0f, 0.0f, 0.0f,
+         -size, height,-size,   1.0f, 1.0f,   1.0f, 0.0f, 0.0f,
+         -size, height, size,   0.0f, 1.0f,   1.0f, 0.0f, 0.0f,
+         -size, 0.0f,   size,   0.0f, 0.0f,   1.0f, 0.0f, 0.0f,
+
+        // --- 5. ŚCIANA PRAWA (X=size, Normalna w lewo -X) ---
+          size, 0.0f,  -size,   1.0f, 0.0f,  -1.0f, 0.0f, 0.0f,
+          size, 0.0f,   size,   0.0f, 0.0f,  -1.0f, 0.0f, 0.0f,
+          size, height, size,   0.0f, 1.0f,  -1.0f, 0.0f, 0.0f,
+          size, height, size,   0.0f, 1.0f,  -1.0f, 0.0f, 0.0f,
+          size, height,-size,   1.0f, 1.0f,  -1.0f, 0.0f, 0.0f,
+          size, 0.0f,  -size,   1.0f, 0.0f,  -1.0f, 0.0f, 0.0f,
+        // --- 6. ŚCIANA PRZEDNIA (Z=size, Normalna w tył -Z) ---
+         -size, 0.0f,   size,   0.0f, 0.0f,   0.0f, 0.0f, -1.0f,
+          size, 0.0f,   size,   1.0f, 0.0f,   0.0f, 0.0f, -1.0f,
+          size, height, size,   1.0f, 1.0f,   0.0f, 0.0f, -1.0f,
+          size, height, size,   1.0f, 1.0f,   0.0f, 0.0f, -1.0f,
+         -size, height, size,   0.0f, 1.0f,   0.0f, 0.0f, -1.0f,
+         -size, 0.0f,   size,   0.0f, 0.0f,   0.0f, 0.0f, -1.0f
     };
 
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
     glBindVertexArray(VAO);
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    // Ważne: sizeof(vertices) automatycznie pobierze rozmiar całej tablicy
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    int stride = 8 * sizeof(float);
+    // 1. Poz
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)0);
     glEnableVertexAttribArray(0);
-
-    // Atrybut 1: Tekstura (2 floaty) - zaczyna się od 3-ciego float w rzędzie
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    // 2. Tex
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
+    // 3. Norm
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, stride, (void*)(5 * sizeof(float)));
+    glEnableVertexAttribArray(2);
 }
 
 // --- POPRAWIONA LOGIKA RUCHU (CHODZENIE) ---
@@ -156,9 +211,17 @@ void display() {
 
     ourShader->use();
 
-    ourShader->setVec3("lightPos", 0.0f, 20.0f, 0.0f); 
+    // --- LAMPA 1 (GŁÓWNA - BIAŁA - SUFIT) ---
+    ourShader->setVec3("lightPos", 0.0f, 15.0f, 0.0f); 
+    ourShader->setVec3("lightColor", 1.0f, 1.0f, 1.0f); // Białe światło
+
+    // --- LAMPA 2 (DODATKOWA - np. CZERWONY NEON W ROGU) ---
+    ourShader->setVec3("lightPos2", 0.0f, 2.0f, 0.0f); 
+    
+    // Ustawiamy kolor na intensywny czerwony (R=1, G=0, B=0)
+    ourShader->setVec3("lightColor2", currentLightColor.x, currentLightColor.y, currentLightColor.z);
+    // Kamera
     ourShader->setVec3("viewPos", cameraPos.x, cameraPos.y, cameraPos.z);
-    ourShader->setVec3("lightColor", 1.0f, 1.0f, 1.0f);
 
     glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)windowWidth / (float)windowHeight, 0.1f, 100.0f);
@@ -166,18 +229,32 @@ void display() {
     ourShader->setMat4("view", view);
     ourShader->setMat4("projection", projection);
 
-    // --- RYSOWANIE PODŁOGI ---
+// --- RYSOWANIE POMIESZCZENIA ---
     glm::mat4 model = glm::mat4(1.0f);
     ourShader->setMat4("model", model);
     ourShader->setInt("useTexture", 1);
-    ourShader->setInt("texture1", 0);
-    ourShader->setFloat("tiling", 10.0f); // Gęsta podłoga
-    ourShader->setVec3("objectColor", 1.0f, 1.0f, 1.0f);
+    
+    // Resetujemy kolor na biały, żeby tekstury nie były przyciemnione
+    ourShader->setVec3("objectColor", 1.0f, 1.0f, 1.0f); 
 
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, floorTexture);
     glBindVertexArray(VAO);
+
+    // 1. PODŁOGA (Pierwsze 6 wierzchołków)
+    glBindTexture(GL_TEXTURE_2D, floorTexture);
+    ourShader->setFloat("tiling", 10.0f); 
     glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    // 2. SUFIT (Kolejne 6 wierzchołków -> start od 6)
+    glBindTexture(GL_TEXTURE_2D, ceilingTexture);
+    ourShader->setFloat("tiling", 3.0f);
+    glDrawArrays(GL_TRIANGLES, 6, 6);
+
+    // 3. ŚCIANY
+    glBindTexture(GL_TEXTURE_2D, wallTexture);
+    ourShader->setFloat("tiling", 1.0f); 
+    
+    glDrawArrays(GL_TRIANGLES, 12, 24);
 
     // --- RYSOWANIE SAMOCHODÓW W PĘTLI ---
     // Obliczamy pozycję startową, żeby środkowe auto było na środku (X=0)
@@ -274,6 +351,27 @@ void keyboardDown(unsigned char key, int x, int y) {
         if(isWireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         else glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     }
+
+    if(key == 'c' || key == 'C') {
+        // Losujemy 3 liczby od 0.0 do 1.0
+        float r = (float)rand() / RAND_MAX;
+        float g = (float)rand() / RAND_MAX;
+        float b = (float)rand() / RAND_MAX;
+        
+        currentLightColor = glm::vec3(r, g, b);
+        std::cout << "Nowy kolor swiatla: " << r << ", " << g << ", " << b << std::endl;
+    }
+
+    if(key == 'p' || key == 'P') {
+        for(int i = 1; i < CAR_COUNT; i++) {
+            // Losujemy indeks z puli dostępnych lakierów (0-7)
+            int randomPaintIndex = rand() % availablePaints.size();
+            
+            // Przypisujemy nowy lakier do auta
+            assignedPaints[i] = availablePaints[randomPaintIndex];
+        }
+        std::cout << "Przemalowano auta!" << std::endl;
+    }
 }
 
 void keyboardUp(unsigned char key, int x, int y) {
@@ -331,29 +429,38 @@ int main(int argc, char** argv) {
 
     ourShader = new Shader("shaders/shader.vert", "shaders/shader.frag");
 
-    setupFloor();
+    setupRoom();
 
     floorTexture = loadTexture("textures/floor.png");
+    wallTexture  = loadTexture("textures/wall_texture.jpg");
+    ceilingTexture = loadTexture("textures/ceiling.jpg");
+    
     tireTexture  = loadTexture("textures/tire_texture.jpg");
     steelTexture = loadTexture("textures/steel_texture.jpg");
     glassTexture = loadTexture("textures/glass_texture.jpg");
     redTexture   = loadTexture("textures/red_texture.jpg");
     lightTexture = loadTexture("textures/light_texture.jpg");
 
+    std::cout << "Ladowanie palety lakierow..." << std::endl;
+    for(int i = 1; i <= 8; i++) {
+        // Ładujemy car_paint_1.jpg do car_paint_8.jpg
+        std::string texPath = "textures/car_paint_" + std::to_string(i) + ".jpg";
+        availablePaints.push_back(loadTexture(texPath.c_str()));
+    }
+
+// --- 2. ŁADUJEMY AUTA ---
     std::cout << "Ladowanie 5 samochodow..." << std::endl;
     for(int i = 1; i <= CAR_COUNT; i++) {
         std::string modelPath = "models/car-" + std::to_string(i) + ".obj";
-        // UWAGA: Każde auto dostaje swój car_paint_X.jpg
-        std::string texPath = "textures/car_paint_" + std::to_string(i) + ".jpg";
         
         std::cout << "Ladowanie: " << modelPath << std::endl;
         
         Model* newCar = new Model(modelPath);
         carModels.push_back(newCar);
         
-        // Ładujemy dedykowaną teksturę
-        unsigned int paintID = loadTexture(texPath.c_str());
-        assignedPaints.push_back(paintID);
+        // Przypisujemy domyślny lakier z załadowanej wcześniej palety
+        // (i-1) % 8  -> zapewnia, że bierzemy lakiery po kolei, a jak się skończą to od początku
+        assignedPaints.push_back(availablePaints[(i-1) % 8]);
     }
     
     glutDisplayFunc(display);
